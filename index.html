@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net/npm/maplibre-gl@5.21.0/; style-src 'self' https://cdn.jsdelivr.net/npm/maplibre-gl@5.21.0/; img-src 'self' data: blob:; connect-src 'self' https://tiles.openfreemap.org https://disaportaldata.gsi.go.jp https://cdn.jsdelivr.net/npm/maplibre-gl@5.21.0/; worker-src blob:; child-src blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#F6F7F9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E141A" media="(prefers-color-scheme: dark)">
+<title>洪水のときの避難場所（大学のゼミの試作）</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.21.0/dist/maplibre-gl.css"
+  integrity="sha384-MGCxhspF/+ufueUgol3FDkiAYQbpSNRhBT0VWHJt64U8qIy9qlnXWx8LAbj6niPH" crossorigin="anonymous">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="top">
+  <div id="notice" role="note">大学のゼミの試作で、公式の避難情報ではありません。平時の下調べ用です。災害の最中は市区の発表とハザードマップに従ってください。
+    <a id="lk-city" hidden target="_blank" rel="noopener"></a> <a href="https://disaportal.gsi.go.jp/hazardmap/" target="_blank" rel="noopener">わがまちハザードマップ</a></div>
+  <fieldset id="region" class="seg"><legend class="sr">市区</legend></fieldset>
+</div>
+<div id="map" role="application" aria-label="地図。タップするとその地点の結果が下に出ます"></div>
+<div id="cross" aria-hidden="true"></div>
+<div id="mapbtns">
+  <button id="zin" class="round" type="button" aria-label="拡大">+</button>
+  <button id="zout" class="round" type="button" aria-label="縮小">−</button>
+  <button id="here" class="round small" type="button" aria-label="現在地で調べる">現在地</button>
+  <button id="floodbtn" class="round small" type="button" aria-pressed="true" aria-label="想定浸水深の色を地図に出す">浸水</button>
+</div>
+<p id="mapnote" class="src" aria-live="polite"></p>
+<div id="keys" class="keys" aria-label="地図の印"><span><i class="dot tap"></i>押した所</span><span><i class="dot dest"></i>行き先</span><span><i class="dot site"></i>洪水対応</span><span><i class="dot other"></i>洪水の指定なし</span></div>
+<main id="sheet">
+  <div id="banner"></div>
+  <section id="out" aria-live="polite"><p class="sub">読み込み中</p></section>
+  <button id="center" class="wide" type="button">地図の中心で調べる</button>
+  <p id="attrib" class="src">地図: <a href="https://openfreemap.org/" target="_blank" rel="noopener">OpenFreeMap</a> &copy; <a href="https://www.openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a>・地図と経路: &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors・浸水深: <a href="https://disaportal.gsi.go.jp/" target="_blank" rel="noopener">ハザードマップポータルサイト</a></p>
+  <section id="gsi" class="src"></section>
+  <details open>
+    <summary>このデータについて</summary>
+    <div id="about">
+      <p>何をする物か: 地図をタップ（または現在地）すると、国土地理院のデータで洪水に対応する最寄りの指定緊急避難場所、道路沿いの徒歩の分（1.0 m/s と 0.5 m/s）、その地点の想定浸水深を出します。洪水に対応しない場所の方が近い時はそれも出します。区全体の集計（論文の数と図）は同じ処理から出しています（build.py・out/stats.json・figs/）。押した点や現在地の座標はどこにも送らず、URL にも書きません。地図と浸水深の画像は、見ている範囲の分を配信元から取ります。</p>
+      <p>既存の道具（2022 年の「江東区の近い避難所を上位 15 件出す」道具）との差は 3 つ:<br>
+      1. 洪水への対応のフラグ（国土地理院の disaster1）で絞り、洪水の指定が無い近い場所は「洪水の指定がありません」と出す。<br>
+      2. 距離は直線でなく OpenStreetMap の道路沿いで、徒歩の分を 1.0 m/s と 0.5 m/s の 2 通りで出す。<br>
+      3. タップした地点の想定浸水深（洪水・想定最大規模）を、公式の凡例の階級で出す。</p>
+      <p>経路が川を渡るか: 経路の 1 辺が OpenStreetMap の川の水域（water=river・waterway=riverbank。名前は waterway=river の中心線から）を 10 m 以上通る時に「渡る」とする。名前の分からない水域は「名前の分からない水路」と数で出す。水域の書き方の欠けや、運河を川として書いた所の影響を受ける。洪水の時に橋を渡れるかは見ていない。押した所が水域の中なら「川や海の上です」と出す。</p>
+      <details>
+        <summary>作りの理由（v2・開発の記録）</summary>
+        <ul>
+          <li>サーバを置かない: 経路は build.py が事前に計算した「洪水に対応する場所を起点にした最短経路の木」（各節点の親）を route.json に書き出し、ブラウザは押した点に近い格子点から親を辿って線を描くだけにした。経路探索のサーバも外部の経路 API も使わないので、運用の費用と止まる所が無い。</li>
+          <li>背景地図の選択（SPEC の設計の決定 3）: MapLibre GL JS 5.21.0 と OpenFreeMap のベクトル地図（明るい表示は positron、夜は dark）。鍵は要らない。地名は日本語を先に出し、漢字とかなは端末の書体で描く。浸水深は公式のラスタタイルを地名の下・道路の上に重ね、経路の線と点はその上に描く。Leaflet と OpenStreetMap のラスタは、文字が粗く古い見た目になるので替えた。</li>
+        </ul>
+      </details>
+      <p>データの出所と取得日:</p>
+      <div id="sources"></div>
+      <p>URL: 指定緊急避難場所 https://cyberjapandata.gsi.go.jp/xyz/skhb01/{z}/{x}/{y}.geojson 〜 skhb08（仕様 https://maps.gsi.go.jp/development/ichiran.html）／公開状況 https://hinanmap.gsi.go.jp/hinanjocp/defaultFtpData/publicHistoryCSV/publicHistoryListData.csv ／想定浸水深 https://disaportaldata.gsi.go.jp/raster/01_flood_l2_shinsuishin_data/{z}/{x}/{y}.png（凡例 https://disaportal.gsi.go.jp/hazardmap/copyright/img/shinsui_legend3.png）／人口 e-Stat T001142（定義書 https://www.e-stat.go.jp/help/data-definition-information/downloaddata/T001142.pdf）／境界 国土数値情報 N03（2025年1月1日時点）／道路 OpenStreetMap（osmnx network_type=walk）。</p>
+      <p>再現の手順: <code>uv run --script build.py</code>（取得は data/raw/ に保存し、2 回目からはそこから読む）→ <code>uv run --script check.py</code>（不変条件の検査）。地域は <code>REGION=東京都江東区</code> のように替える。4 地域は <code>OFFLINE=1 cmp/run_all.sh</code>。この頁は <code>cd site &amp;&amp; python3 -m http.server</code> で開く。</p>
+      <p>限界:</p>
+      <ul>
+        <li>指定緊急避難場所は国土地理院に登録された物だけ。江東区・墨田区・葛飾区は地理院の公開一覧で「指定避難所データのみ公開」で、区内は 0 件になる（区が指定していないという意味ではない）。収容人数・開設の状況・混雑・備考の条件（例「洪水は２階以上が対象」）は計算に入れていない。</li>
+        <li>区外の場所は、その市区町村が指定した場所。経路が渡る川は上の決め方で全部出すが、洪水の時に橋を渡れるかは見ていない。</li>
+        <li>円と道路網の比べ方: 「円が何 % 多いか」を道路網で届く人数で割ると、届く人数が少ない地域で値が大きく膨らむ（例 数千 %）。地域どうしの比較には、差を区の人口で割った値（stats.json の circle_minus_network_pct_of_ward）を使う。円が道路網以上になるのは作りの上で必ず成り立つ（道路距離は直線距離を下回らない）ので、それ自体は発見ではない。検査の「道路距離が直線より短い点 0」も経路の正しさの証拠にはならない。</li>
+        <li>道路への寄せ方: 格子点と避難場所は、最寄りの道路の節点（交差点）へ直線で寄せる（線分上の最寄りではない）。その直線が川・線路・高速道路を横切るかは見ていないので、到達を甘く見る向きに働く（寄せた距離の最大は stats.json の snap_m）。</li>
+        <li>浸水深の凡例は国土地理院のままで、基準の違う 2 つの区分の色が混ざっている（0.3m未満と0.5m未満、0.5〜1mと0.5〜3m は重なる階級）。結果の欄にはその市区の格子にある階級だけを出す。家の目安（0.5 m＝1 階の床・3 m＝2 階の床下・5 m＝2 階が水没）は国土地理院の浸水ナビの説明から。「着色なし」は想定区域外・タイルの未配信・0.1 m 未満（東京都の図面の規則）を区別できない。表示する値はタップ点に近い 50 m 格子点の 1 画素で、浸水域の境目では地図の色と違うことがある。</li>
+        <li>届かない人の割合は、閾値と場所の集合に強く左右される（stats.json の E3 の sensitivity_unreached_pct と、市区内の場所だけの値 ward_sites_only を並べて読む）。0.5 m/s×20 分と 1.0 m/s×10 分は同じ 600 m で、感度の 6 通りは距離では 5 通り。</li>
+        <li>人口は 2020 年国勢調査の 250m メッシュを 50 m 格子へ面積で按分した（MAUP: メッシュの切り方で分布が変わる。川や運河の上にも人が配られる）。区内は N03 の境界の内の点で数える（住所で数えると 1 件ずれる地域がある）。論文の数は stats.json から取る（この頁の距離は整数 m に丸めてある）。</li>
+        <li>OpenStreetMap の歩道・通路の記載の欠け、浸水した道路を歩けるか、坂・階段・夜間・混雑は見ていない。</li>
+      </ul>
+    </div>
+  </details>
+
+</main>
+<script async data-maplibre src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.21.0/dist/maplibre-gl.js"
+  integrity="sha384-Ws3wKfmCwrf1DlrykKbzQqYw4qv+2lCQfIJL/e7ug7Gaz2ACIYYy1R6E/rYG69f1" crossorigin="anonymous"></script>
+<script src="app.js"></script>
+</body>
+</html>
