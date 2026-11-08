@@ -26,7 +26,7 @@ function setData(id, data) { state[id] = data; const s = map && map.getSource(id
 let map = null, lastFit = null;
 function fit(b, opts) {
   const { t, b: sb } = view();
-  const o = { ...opts, padding: { top: Math.round(t) + 16, bottom: Math.max(16, Math.round(innerHeight - sb) + 48 + $("keys").offsetHeight), left: 24, right: 84 } };
+  const o = { ...opts, padding: { top: Math.round(t) + 40, bottom: Math.max(16, Math.round(innerHeight - sb) + 48 + $("keys").offsetHeight), left: 24, right: 84 } };
   lastFit = [b, o]; placeCross(); if (map) map.fitBounds(b, o);
 }
 function initMap() {
@@ -71,7 +71,7 @@ map.on("style.load", () => {
   map.addLayer({ id: "tap", type: "circle", source: "tap", paint: { "circle-radius": 8, "circle-color": css("--accent"), "circle-stroke-color": css("--surface"), "circle-stroke-width": 3 } });
   if (font) map.addLayer({ id: "dest-name", type: "symbol", source: "dest",
     layout: { "text-field": ["get", "name"], "text-font": font, "text-size": 14, "text-anchor": ["get", "anchor"], "text-max-width": 10,
-      "text-offset": ["case", ["==", ["get", "anchor"], "right"], ["literal", [-1.2, 0]], ["literal", [1.2, 0]]] },
+      "text-offset": ["match", ["get", "anchor"], "bottom-right", ["literal", [-0.8, -0.8]], "bottom-left", ["literal", [0.8, -0.8]], "top-right", ["literal", [-0.8, 0.8]], ["literal", [0.8, 0.8]]] },
     paint: { "text-color": css("--ink"), "text-halo-color": css("--surface"), "text-halo-width": 2 } });
 });
 let mapNoted = false;
@@ -289,7 +289,7 @@ async function query(lat, lng, isExample) {
     const line = rt.pts.map(([a, b]) => [b, a]);
     setData("route", { type: "FeatureCollection", features: [{ type: "Feature", geometry: { type: "LineString", coordinates: line }, properties: {} }] });
     const xs = line.map((p) => p[0]), ys = line.map((p) => p[1]);
-    const anchor = s[5] > (Math.min(...xs) + Math.max(...xs)) / 2 ? "right" : "left";
+    const prev = line[Math.max(0, line.length - 2)], anchor = (prev[1] > s[4] ? "top-" : "bottom-") + (s[5] > (Math.min(...xs) + Math.max(...xs)) / 2 ? "right" : "left");
     setData("dest", { type: "FeatureCollection", features: [{ type: "Feature", geometry: { type: "Point", coordinates: [s[5], s[4]] }, properties: { name: s[0], anchor } }] });
     routeBox = [[Math.min(...xs), Math.min(...ys)], [Math.max(...xs), Math.max(...ys)]];
   }
